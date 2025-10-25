@@ -56,9 +56,6 @@ dependencies:
   # Settings storage
   shared_preferences: ^2.2.2
 
-  # ML Kit for person detection
-  google_mlkit_pose_detection: ^0.13.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

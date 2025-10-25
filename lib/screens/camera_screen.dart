@@ -4,7 +4,7 @@ import 'package:camera/camera.dart';
 import '../services/camera_service.dart';
 import '../services/api_service.dart';
 import '../features/detection/time_tracker.dart';
-import '../features/detection/person_detector.dart';
+import '../features/detection/motion_detector.dart';
 import '../shared/models/stay_data.dart';
 
 class CameraScreen extends StatefulWidget {
@@ -18,13 +18,13 @@ class _CameraScreenState extends State<CameraScreen> {
   final CameraService _cameraService = CameraService();
   final ApiService _apiService = ApiService();
   final TimeTracker _timeTracker = TimeTracker();
-  final PersonDetector _personDetector = PersonDetector();
+  final MotionDetector _motionDetector = MotionDetector();
 
   bool _isInitialized = false;
-  bool _isDetectionEnabled = false; // 기본값: 수동 모드
+  bool _isDetectionEnabled = true; // 기본값: 자동 모션 감지
   String? _message;
   Timer? _sendTimer;
-  DetectionResult? _lastDetection;
+  Corner? _lastDetectedCorner;
 
   @override
   void initState() {
@@ -50,17 +50,15 @@ class _CameraScreenState extends State<CameraScreen> {
     });
 
     if (success) {
-      // Set camera for person detector
-      final camera = _cameraService.currentCamera;
-      if (camera != null) {
-        _personDetector.setCamera(camera);
-      }
+      // Start motion detection
+      _startDetection();
 
-      // 수동 모드로 시작 (자동 감지는 버튼으로 활성화)
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) {
           setState(() {
-            _message = 'Manual mode - Tap corners to track time';
+            _message = _isDetectionEnabled
+                ? 'Auto motion detection enabled'
+                : 'Manual mode - Tap corners';
           });
         }
       });
@@ -70,26 +68,18 @@ class _CameraScreenState extends State<CameraScreen> {
   void _startDetection() {
     if (!_isDetectionEnabled) return;
 
-    _cameraService.controller?.startImageStream((CameraImage image) async {
+    _cameraService.controller?.startImageStream((CameraImage image) {
       if (!_isDetectionEnabled) return;
 
-      final result = await _personDetector.detectPerson(image);
+      final corner = _motionDetector.detectMotion(image);
 
-      if (result != null) {
-        // 낮은 임계값 사용 (0.3 = 30%)
-        if (result.confidence > 0.3) {
-          final corner = result.getCorner();
+      if (corner != null && mounted) {
+        setState(() {
+          _lastDetectedCorner = corner;
+          _timeTracker.startTracking(corner);
+        });
 
-          if (mounted) {
-            setState(() {
-              _lastDetection = result;
-              _timeTracker.startTracking(corner);
-            });
-          }
-
-          // 감지 성공 시에만 코너 정보 로그
-          print('📍 Tracking: ${_getCornerName(corner)} | Confidence: ${(result.confidence * 100).toStringAsFixed(0)}%');
-        }
+        print('📍 Motion in: ${_getCornerName(corner)}');
       }
     });
   }
@@ -103,7 +93,8 @@ class _CameraScreenState extends State<CameraScreen> {
       _isDetectionEnabled = !_isDetectionEnabled;
 
       if (_isDetectionEnabled) {
-        _message = 'Auto-detection enabled';
+        _message = 'Auto motion detection enabled';
+        _motionDetector.reset(); // Reset previous frame
         _startDetection();
       } else {
         _message = 'Manual mode - Tap corners';
@@ -143,7 +134,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _sendTimer?.cancel();
     _stopDetection();
     _timeTracker.dispose();
-    _personDetector.dispose();
+    _motionDetector.dispose();
     _cameraService.dispose();
     super.dispose();
   }
@@ -203,27 +194,12 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
             ),
 
-          // Detection indicator (in auto mode)
-          if (_isInitialized && _isDetectionEnabled && _lastDetection != null)
-            Positioned(
-              left: _lastDetection!.x * MediaQuery.of(context).size.width - 25,
-              top: _lastDetection!.y * MediaQuery.of(context).size.height - 25,
-              child: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.green,
-                    width: 3,
-                  ),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.person,
-                    color: Colors.green,
-                    size: 30,
-                  ),
+          // Corner highlight (in auto mode)
+          if (_isInitialized && _isDetectionEnabled && _lastDetectedCorner != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: CornerHighlightPainter(_lastDetectedCorner!),
                 ),
               ),
             ),
@@ -371,5 +347,51 @@ class _CameraScreenState extends State<CameraScreen> {
         ),
       ],
     );
+  }
+}
+
+/// Custom painter to highlight the corner with motion
+class CornerHighlightPainter extends CustomPainter {
+  final Corner corner;
+
+  CornerHighlightPainter(this.corner);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.green.withValues(alpha: 0.3)
+      ..style = PaintingStyle.fill;
+
+    final borderPaint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+
+    Rect rect;
+    final halfWidth = size.width / 2;
+    final halfHeight = size.height / 2;
+
+    switch (corner) {
+      case Corner.topLeft:
+        rect = Rect.fromLTWH(0, 0, halfWidth, halfHeight);
+        break;
+      case Corner.topRight:
+        rect = Rect.fromLTWH(halfWidth, 0, halfWidth, halfHeight);
+        break;
+      case Corner.bottomLeft:
+        rect = Rect.fromLTWH(0, halfHeight, halfWidth, halfHeight);
+        break;
+      case Corner.bottomRight:
+        rect = Rect.fromLTWH(halfWidth, halfHeight, halfWidth, halfHeight);
+        break;
+    }
+
+    canvas.drawRect(rect, paint);
+    canvas.drawRect(rect, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(CornerHighlightPainter oldDelegate) {
+    return oldDelegate.corner != corner;
   }
 }
