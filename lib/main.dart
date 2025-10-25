@@ -20,20 +20,18 @@ class MyApp extends StatelessWidget {
           primary: const Color(0xFF00FF88),
           secondary: const Color(0xFF00CCFF),
           surface: const Color(0xFF1A1A1A),
-          background: const Color(0xFF000000),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF000000),
           elevation: 0,
         ),
-        cardTheme: CardTheme(
-          color: const Color(0xFF1A1A1A),
+        cardTheme: const CardThemeData(
+          color: Color(0xFF1A1A1A),
           elevation: 4,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.all(Radius.circular(16)),
           ),
         ),
-        useMaterial3: true,
       ),
       // Show Dashboard on Web, Camera on Mobile
       home: kIsWeb
